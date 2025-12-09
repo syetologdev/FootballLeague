@@ -75,9 +75,6 @@ class SupabaseRepository {
         }
     }
 
-    // ===========================
-    // 🔔 SUBSCRIPTIONS
-    // ===========================
 
     fun subscribeToMatch(userId: String, matchId: Long): Flow<Boolean> = flow {
         try {
