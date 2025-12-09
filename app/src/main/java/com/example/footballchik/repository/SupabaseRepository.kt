@@ -27,9 +27,6 @@ class SupabaseRepository {
         install(Realtime)
     }
 
-    // ===========================
-    // 🔐 AUTHENTICATION
-    // ===========================
 
     fun registerUser(email: String, password: String): Flow<Pair<Boolean, String>> = flow {
         try {
