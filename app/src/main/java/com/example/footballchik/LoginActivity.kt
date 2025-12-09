@@ -36,7 +36,6 @@ class LoginActivity : AppCompatActivity() {
             return
         }
 
-        // Инициализация View
         emailInput = findViewById(R.id.email_input)
         passwordInput = findViewById(R.id.password_input)
         submitButton = findViewById(R.id.submit_button)
