@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Изменить название приложения -->
+    <string name="app_name">Футбольная Лига</string>
+
+    <!-- Добавить названия для навигации -->
+    <string name="title_table">Таблица</string>
+    <string name="title_schedule">Расписание</string>
+    <string name="title_team">Команда</string>
+    <string name="title_notifications">Уведомления</string>
+</resources>

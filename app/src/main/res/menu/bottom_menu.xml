@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/tableFragment"
+        android:title="Таблица"
+        android:icon="@android:drawable/ic_dialog_info" />
+
+    <item
+        android:id="@+id/scheduleFragment"
+        android:title="Расписание"
+        android:icon="@android:drawable/ic_menu_today" />
+
+    <item
+        android:id="@+id/teamFragment"
+        android:title="Команды"
+        android:icon="@android:drawable/ic_menu_view" />
+
+    <item
+        android:id="@+id/notificationsFragment"
+        android:title="Уведомления"
+        android:icon="@android:drawable/ic_menu_info_details" />
+
+    <item
+        android:id="@+id/profileFragment"
+        android:icon="@android:drawable/ic_menu_preferences"
+        android:title="Профиль" />
+
+</menu>

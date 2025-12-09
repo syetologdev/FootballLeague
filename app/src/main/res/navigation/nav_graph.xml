@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/nav_graph"
+    app:startDestination="@id/tableFragment">
+
+    <fragment
+        android:id="@+id/tableFragment"
+        android:name="com.example.footballchik.screens.TableFragment"
+        android:label="Таблица лиги" />
+
+    <fragment
+        android:id="@+id/scheduleFragment"
+        android:name="com.example.footballchik.screens.ScheduleFragment"
+        android:label="Расписание матчей" />
+
+    <fragment
+        android:id="@+id/teamFragment"
+        android:name="com.example.footballchik.screens.TeamFragment"
+        android:label="Профиль команды" />
+
+    <fragment
+        android:id="@+id/notificationsFragment"
+        android:name="com.example.footballchik.screens.NotificationsFragment"
+        android:label="Уведомления" />
+
+</navigation>
