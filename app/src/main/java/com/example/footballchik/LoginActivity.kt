@@ -30,7 +30,7 @@ class LoginActivity : AppCompatActivity() {
 
         authManager = AuthManager(this)
 
-        // Проверяем, если уже залогинен - сразу в MainActivity
+
         if (authManager.isLoggedIn()) {
             goToMainActivity()
             return
