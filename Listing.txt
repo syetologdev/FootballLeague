@@ -1,0 +1,723 @@
+// MatchAdapter
+package com.example.footballchik.adapter
+
+import android.util.Log
+import android.view.LayoutInflater
+import android.view.ViewGroup
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.ListAdapter
+import androidx.recyclerview.widget.RecyclerView
+import com.example.footballchik.databinding.ItemMatchBinding
+import com.example.footballchik.models.Match
+import com.example.footballchik.repository.SupabaseRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+
+class MatchAdapter : ListAdapter<Match, MatchAdapter.MatchViewHolder>(MatchDiffCallback()) {
+
+    private val repository = SupabaseRepository()
+    private val teamNameCache = mutableMapOf<Long, String>()
+    private var teamsLoaded = false
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MatchViewHolder {
+        val binding = ItemMatchBinding.inflate(
+            LayoutInflater.from(parent.context),
+            parent,
+            false
+        )
+        return MatchViewHolder(binding, teamNameCache)
+    }
+
+    override fun onBindViewHolder(holder: MatchViewHolder, position: Int) {
+        holder.bind(getItem(position))
+    }
+
+    // Загружаем все команды один раз при инициализации
+    fun loadTeamsCache() {
+        if (teamsLoaded) return
+
+        CoroutineScope(Dispatchers.Main).launch {
+            try {
+                repository.getAllTeams().collect { teamsList ->
+                    teamsList.forEach { team ->
+                        teamNameCache[team.id] = team.name
+                        Log.d("MatchAdapter", "Cached: ${team.id} -> ${team.name}")
+                    }
+                    teamsLoaded = true
+                    notifyDataSetChanged() // Обновляем адаптер после загрузки
+                }
+            } catch (e: Exception) {
+                Log.e("MatchAdapter", "Error loading teams cache", e)
+            }
+        }
+    }
+
+    class MatchViewHolder(
+        private val binding: ItemMatchBinding,
+        private val teamNameCache: Map<Long, String>
+    ) : RecyclerView.ViewHolder(binding.root) {
+
+        fun bind(match: Match) {
+            with(binding) {
+                // Используем кешированные названия
+                val homeTeamName = teamNameCache[match.home_team_id] ?: "Team ${match.home_team_id}"
+                val awayTeamName = teamNameCache[match.away_team_id] ?: "Team ${match.away_team_id}"
+
+                this.homeTeamName.text = homeTeamName
+                this.awayTeamName.text = awayTeamName
+
+                matchDate.text = "📅 ${match.date}"
+                matchStatus.text = "Статус: ${match.status}"
+
+                if (match.status == "completed" && match.home_score != null && match.away_score != null) {
+                    matchScore.text = "${match.home_score} : ${match.away_score}"
+                    matchScore.visibility = android.view.View.VISIBLE
+                } else {
+                    matchScore.text = "⏳ Грядущий матч"
+                    matchScore.visibility = android.view.View.VISIBLE
+                }
+
+                Log.d("MatchAdapter", "Binding match: $homeTeamName vs $awayTeamName")
+            }
+        }
+    }
+
+    private class MatchDiffCallback : DiffUtil.ItemCallback<Match>() {
+        override fun areItemsTheSame(oldItem: Match, newItem: Match) = oldItem.id == newItem.id
+        override fun areContentsTheSame(oldItem: Match, newItem: Match) = oldItem == newItem
+    }
+}
+
+// NotificationAdapter
+package com.example.footballchik.adapter
+
+import android.util.Log
+import android.view.LayoutInflater
+import android.view.ViewGroup
+import android.widget.Toast
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.ListAdapter
+import androidx.recyclerview.widget.RecyclerView
+import com.example.footballchik.databinding.ItemNotificationBinding
+import com.example.footballchik.models.Match
+import com.example.footballchik.repository.SupabaseRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+
+class NotificationAdapter(
+    private val userId: String = "user_123",
+    private val teamNameCache: Map<Long, String> = emptyMap()
+) : ListAdapter<Match, NotificationAdapter.NotificationViewHolder>(NotificationDiffCallback()) {
+
+    private val repository = SupabaseRepository()
+    private val subscribedMatches = mutableSetOf<Long>()
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): NotificationViewHolder {
+        val binding = ItemNotificationBinding.inflate(
+            LayoutInflater.from(parent.context),
+            parent,
+            false
+        )
+        return NotificationViewHolder(binding, repository, userId, subscribedMatches, teamNameCache)
+    }
+
+    override fun onBindViewHolder(holder: NotificationViewHolder, position: Int) {
+        holder.bind(getItem(position))
+    }
+
+    class NotificationViewHolder(
+        private val binding: ItemNotificationBinding,
+        private val repository: SupabaseRepository,
+        private val userId: String,
+        private val subscribedMatches: MutableSet<Long>,
+        private val teamNameCache: Map<Long, String>
+    ) : RecyclerView.ViewHolder(binding.root) {
+
+        fun bind(match: Match) {
+            with(binding) {
+                // Получаем названия из кеша ИЛИ используем ID как fallback
+                val homeTeamName = teamNameCache[match.home_team_id] ?: "Team ${match.home_team_id}"
+                val awayTeamName = teamNameCache[match.away_team_id] ?: "Team ${match.away_team_id}"
+
+                Log.d("NotificationViewHolder", "Binding match: $homeTeamName vs $awayTeamName (Cache size: ${teamNameCache.size})")
+
+                notificationTitle.text = "🔔 Грядущий матч"
+                notificationMessage.text = "$homeTeamName vs $awayTeamName"
+                notificationDate.text = "📅 ${match.date}"
+
+                val isSubscribed = subscribedMatches.contains(match.id)
+                notificationAction.text = if (isSubscribed) "✅ Подписан" else "📢 Подписаться"
+                notificationAction.isEnabled = !isSubscribed
+
+                notificationAction.setOnClickListener {
+                    if (!isSubscribed) {
+                        subscribeToMatch(match.id)
+                    }
+                }
+            }
+        }
+
+        private fun subscribeToMatch(matchId: Long) {
+            CoroutineScope(Dispatchers.Main).launch {
+                try {
+                    Log.d("NotificationViewHolder", "Subscribing user $userId to match $matchId")
+
+                    repository.subscribeToMatch(userId, matchId).collect { success ->
+                        if (success) {
+                            subscribedMatches.add(matchId)
+                            binding.notificationAction.text = "✅ Подписан"
+                            binding.notificationAction.isEnabled = false
+
+                            Log.d("NotificationViewHolder", "Successfully subscribed to match $matchId")
+
+                            Toast.makeText(
+                                itemView.context,
+                                "Вы подписались на матч!",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            Log.e("NotificationViewHolder", "Failed to subscribe to match $matchId")
+                            Toast.makeText(
+                                itemView.context,
+                                "Ошибка при подписке",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("NotificationViewHolder", "Error subscribing", e)
+                    Toast.makeText(
+                        itemView.context,
+                        "Ошибка: ${e.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private class NotificationDiffCallback : DiffUtil.ItemCallback<Match>() {
+        override fun areItemsTheSame(oldItem: Match, newItem: Match) = oldItem.id == newItem.id
+        override fun areContentsTheSame(oldItem: Match, newItem: Match) = oldItem == newItem
+    }
+}
+
+// TeamAdapter
+package com.example.footballchik.adapter
+
+import android.view.LayoutInflater
+import android.view.ViewGroup
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.ListAdapter
+import androidx.recyclerview.widget.RecyclerView
+import com.example.footballchik.databinding.ItemTeamBinding
+import com.example.footballchik.models.Team
+
+class TeamAdapter : ListAdapter<Team, TeamAdapter.TeamViewHolder>(TeamDiffCallback()) {
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): TeamViewHolder {
+        val binding = ItemTeamBinding.inflate(
+            LayoutInflater.from(parent.context),
+            parent,
+            false
+        )
+        return TeamViewHolder(binding)
+    }
+
+    override fun onBindViewHolder(holder: TeamViewHolder, position: Int) {
+        holder.bind(getItem(position))
+    }
+
+    class TeamViewHolder(private val binding: ItemTeamBinding) :
+        RecyclerView.ViewHolder(binding.root) {
+
+        fun bind(team: Team) {
+            with(binding) {
+                teamName.text = team.name
+                teamPoints.text = "Очки: ${team.points}"
+                teamMatches.text = "Матчи: ${team.matches}"
+                teamGoals.text = "Голы: ${team.goalsFor} - ${team.goalsAgainst}"
+            }
+        }
+    }
+
+    private class TeamDiffCallback : DiffUtil.ItemCallback<Team>() {
+        override fun areItemsTheSame(oldItem: Team, newItem: Team) = oldItem.id == newItem.id
+        override fun areContentsTheSame(oldItem: Team, newItem: Team) = oldItem == newItem
+    }
+}
+
+// SupabaseRepository
+package com.example.footballchik.repository
+
+import android.util.Log
+import com.example.footballchik.models.Match
+import com.example.footballchik.models.Player
+import com.example.footballchik.models.Subscription
+import com.example.footballchik.models.Team
+import com.example.footballchik.models.User
+import com.example.footballchik.utils.Constants
+import com.example.footballchik.utils.PasswordHasher
+import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.createSupabaseClient
+import io.github.jan.supabase.postgrest.Postgrest
+import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.realtime.Realtime
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import java.util.UUID
+
+class SupabaseRepository {
+
+    private val supabase: SupabaseClient = createSupabaseClient(
+        supabaseUrl = Constants.SUPABASE_URL,
+        supabaseKey = Constants.SUPABASE_KEY
+    ) {
+        install(Postgrest)
+        install(Realtime)
+    }
+
+
+    fun registerUser(email: String, password: String): Flow<Pair<Boolean, String>> = flow {
+        try {
+            val hash = PasswordHasher.hashPassword(password)
+            val userId = UUID.randomUUID().toString()
+
+            val userMap = mapOf(
+                "id" to userId,
+                "email" to email,
+                "password_hash" to hash,
+                "role" to "viewer"
+            )
+
+            supabase.from("users").insert(userMap)
+            emit(Pair(true, userId))
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emit(Pair(false, "Ошибка регистрации: ${e.message}"))
+        }
+    }
+
+    fun loginUser(email: String, password: String): Flow<Pair<Boolean, User?>> = flow {
+        try {
+            val users = supabase.from("users").select {
+                filter {
+                    eq("email", email)
+                }
+            }.decodeList<User>()
+
+            if (users.isNotEmpty()) {
+                val user = users[0]
+                if (PasswordHasher.verifyPassword(password, user.password_hash)) {
+                    emit(Pair(true, user))
+                } else {
+                    emit(Pair(false, null)) // Неверный пароль
+                }
+            } else {
+                emit(Pair(false, null)) // Пользователь не найден
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emit(Pair(false, null))
+        }
+    }
+
+
+    fun subscribeToMatch(userId: String, matchId: Long): Flow<Boolean> = flow {
+        try {
+            supabase.from("subscriptions").insert(
+                mapOf(
+                    "user_id" to userId,
+                    "match_id" to matchId.toString()
+                )
+            )
+            emit(true)
+        } catch (e: Exception) {
+            Log.e("SupabaseRepo", "Error subscribing: ${e.message}")
+            e.printStackTrace()
+            emit(false)
+        }
+    }
+
+    fun getSubscriptionsByUser(userId: String): Flow<List<Subscription>> = flow {
+        try {
+            val subs = supabase.from("subscriptions").select {
+                filter {
+                    eq("user_id", userId)
+                }
+            }.decodeList<Subscription>()
+            emit(subs)
+        } catch (e: Exception) {
+            emit(emptyList())
+        }
+    }
+
+    // ===========================
+    // ⚽ TEAMS
+    // ===========================
+
+    fun getAllTeams(): Flow<List<Team>> = flow {
+        try {
+            val teams = supabase.from(Constants.TEAMS_TABLE).select().decodeList<Team>()
+            emit(teams)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emit(emptyList())
+        }
+    }
+
+    fun addTeam(team: Team): Flow<Boolean> = flow {
+        try {
+            supabase.from(Constants.TEAMS_TABLE).insert(team)
+            emit(true)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emit(false)
+        }
+    }
+
+    // ===========================
+    // 📅 MATCHES
+    // ===========================
+
+    fun getAllMatches(): Flow<List<Match>> = flow {
+        try {
+            val matches = supabase.from(Constants.MATCHES_TABLE).select().decodeList<Match>()
+            emit(matches)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emit(emptyList())
+        }
+    }
+
+    fun addMatch(match: Match): Flow<Boolean> = flow {
+        try {
+            supabase.from(Constants.MATCHES_TABLE).insert(match)
+            emit(true)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emit(false)
+        }
+    }
+
+    fun updateMatch(matchId: Long, homeScore: Int, awayScore: Int): Flow<Boolean> = flow {
+        try {
+            supabase.from(Constants.MATCHES_TABLE).update(mapOf(
+                "home_score" to homeScore,
+                "away_score" to awayScore,
+                "status" to "completed"
+            )) {
+                filter { eq("id", matchId) }
+            }
+            emit(true)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emit(false)
+        }
+    }
+
+    // ===========================
+    // 🏃 PLAYERS
+    // ===========================
+
+    fun getPlayersByTeam(teamId: Long): Flow<List<Player>> = flow {
+        try {
+            val players = supabase.from(Constants.PLAYERS_TABLE).select {
+                filter { eq("team_id", teamId) }
+            }.decodeList<Player>()
+            emit(players)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emit(emptyList())
+        }
+    }
+
+    fun addPlayer(player: Player): Flow<Boolean> = flow {
+        try {
+            supabase.from(Constants.PLAYERS_TABLE).insert(player)
+            emit(true)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emit(false)
+        }
+    }
+
+    fun deletePlayer(playerId: Long): Flow<Boolean> = flow {
+        try {
+            supabase.from(Constants.PLAYERS_TABLE).delete {
+                filter { eq("id", playerId) }
+            }
+            emit(true)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emit(false)
+        }
+    }
+}
+
+// AuthManager
+package com.example.footballchik.utils
+
+import android.content.Context
+import android.content.SharedPreferences
+
+class AuthManager(context: Context) {
+
+    private val prefs: SharedPreferences = context.getSharedPreferences(
+        "footballchik_auth",
+        Context.MODE_PRIVATE
+    )
+
+    companion object {
+        private const val KEY_USER_ID = "user_id"
+        private const val KEY_EMAIL = "email"
+        private const val KEY_ROLE = "role"
+        private const val KEY_IS_LOGGED_IN = "is_logged_in"
+    }
+
+    // Логин (сохраняем пользователя)
+    fun login(userId: String, email: String, role: String = "viewer") {
+        prefs.edit().apply {
+            putString(KEY_USER_ID, userId)
+            putString(KEY_EMAIL, email)
+            putString(KEY_ROLE, role)
+            putBoolean(KEY_IS_LOGGED_IN, true)
+            apply()
+        }
+    }
+
+    // Разлогин
+    fun logout() {
+        prefs.edit().apply {
+            clear()
+            apply()
+        }
+    }
+
+    // Получить ID пользователя
+    fun getUserId(): String {
+        return prefs.getString(KEY_USER_ID, "") ?: ""
+    }
+
+    // Получить email пользователя
+    fun getEmail(): String {
+        return prefs.getString(KEY_EMAIL, "") ?: ""
+    }
+
+    // Получить роль пользователя
+    fun getRole(): String {
+        return prefs.getString(KEY_ROLE, "viewer") ?: "viewer"
+    }
+
+    // Проверить залогинен ли
+    fun isLoggedIn(): Boolean {
+        return prefs.getBoolean(KEY_IS_LOGGED_IN, false)
+    }
+}
+// LoginActivity
+package com.example.footballchik
+
+import android.content.Intent
+import android.os.Bundle
+import android.widget.Button
+import android.widget.EditText
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import com.example.footballchik.repository.SupabaseRepository
+import com.example.footballchik.utils.AuthManager
+import kotlinx.coroutines.launch
+
+class LoginActivity : AppCompatActivity() {
+
+    private lateinit var emailInput: EditText
+    private lateinit var passwordInput: EditText
+    private lateinit var submitButton: Button
+    private lateinit var toggleModeButton: TextView
+    private lateinit var authTitle: TextView
+    private lateinit var authManager: AuthManager
+
+    private val repository = SupabaseRepository()
+    private var isLoginMode = true // true = Вход, false = Регистрация
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_login)
+
+        authManager = AuthManager(this)
+
+
+        if (authManager.isLoggedIn()) {
+            goToMainActivity()
+            return
+        }
+
+        emailInput = findViewById(R.id.email_input)
+        passwordInput = findViewById(R.id.password_input)
+        submitButton = findViewById(R.id.submit_button)
+        toggleModeButton = findViewById(R.id.toggle_mode_button)
+        authTitle = findViewById(R.id.auth_title)
+
+        updateUI()
+
+        // Кнопка "Войти" / "Зарегистрироваться"
+        submitButton.setOnClickListener {
+            val email = emailInput.text.toString().trim()
+            val password = passwordInput.text.toString().trim()
+
+            if (email.isNotEmpty() && password.isNotEmpty()) {
+                if (isLoginMode) {
+                    loginUser(email, password)
+                } else {
+                    registerUser(email, password)
+                }
+            } else {
+                Toast.makeText(this, "Заполните все поля", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        // Переключение режима (Вход <-> Регистрация)
+        toggleModeButton.setOnClickListener {
+            isLoginMode = !isLoginMode
+            updateUI()
+            emailInput.text.clear()
+            passwordInput.text.clear()
+        }
+    }
+
+    private fun updateUI() {
+        if (isLoginMode) {
+            submitButton.text = "Войти"
+            authTitle.text = "Войди в свой аккаунт"
+            toggleModeButton.text = "Нет аккаунта? Создать аккаунт"
+        } else {
+            submitButton.text = "Зарегистрироваться"
+            authTitle.text = "Создай новый аккаунт"
+            toggleModeButton.text = "Уже есть аккаунт? Войти"
+        }
+    }
+
+    private fun loginUser(email: String, pass: String) {
+        lifecycleScope.launch {
+            submitButton.isEnabled = false
+            try {
+                repository.loginUser(email, pass).collect { (success, user) ->
+                    submitButton.isEnabled = true
+                    if (success && user != null) {
+                        // Сохраняем сессию
+                        authManager.login(user.id, user.email, user.role)
+                        Toast.makeText(this@LoginActivity, "Добро пожаловать!", Toast.LENGTH_SHORT).show()
+                        goToMainActivity()
+                    } else {
+                        Toast.makeText(this@LoginActivity, "❌ Неверный email или пароль", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                submitButton.isEnabled = true
+                Toast.makeText(this@LoginActivity, "Ошибка: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun registerUser(email: String, pass: String) {
+        // Валидация email
+        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
+            Toast.makeText(this, "Введите корректный email", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // Валидация пароля (минимум 6 символов)
+        if (pass.length < 6) {
+            Toast.makeText(this, "Пароль должен быть минимум 6 символов", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        lifecycleScope.launch {
+            submitButton.isEnabled = false
+            try {
+                repository.registerUser(email, pass).collect { (success, message) ->
+                    if (success) {
+                        Toast.makeText(this@LoginActivity, "✅ Регистрация успешна! Входим...", Toast.LENGTH_SHORT).show()
+                        // Сразу логиним после успешной регистрации
+                        loginUser(email, pass)
+                    } else {
+                        submitButton.isEnabled = true
+                        Toast.makeText(this@LoginActivity, "❌ $message", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                submitButton.isEnabled = true
+                Toast.makeText(this@LoginActivity, "Ошибка: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun goToMainActivity() {
+        val intent = Intent(this, MainActivity::class.java)
+        // Очищаем стек activity, чтобы нельзя было вернуться назад на логин
+        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        startActivity(intent)
+        finish()
+    }
+}
+
+// MainActivity
+package com.example.footballchik
+
+import android.os.Bundle
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.Fragment
+import com.example.footballchik.screens.NotificationsFragment
+import com.example.footballchik.screens.ProfileFragment
+import com.example.footballchik.screens.ScheduleFragment
+import com.example.footballchik.screens.TableFragment
+import com.example.footballchik.screens.TeamsFragment
+import com.example.footballchik.utils.AuthManager
+import com.google.android.material.bottomnavigation.BottomNavigationView
+
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var bottomNav: BottomNavigationView
+    private lateinit var authManager: AuthManager
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        authManager = AuthManager(this)
+        bottomNav = findViewById(R.id.bottom_navigation)
+
+        // Устанавливаем цвет панели навигации
+        bottomNav.setBackgroundColor(ContextCompat.getColor(this, R.color.nav_bg))
+
+        // Загрузить TableFragment по умолчанию
+        if (savedInstanceState == null) {
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.fragment_container, TableFragment())
+                .commit()
+        }
+
+        // Обработчик нажатий на элементы меню
+        bottomNav.setOnItemSelectedListener { menuItem ->
+            val selectedFragment: Fragment = when (menuItem.itemId) {
+                R.id.tableFragment -> TableFragment()
+                R.id.scheduleFragment -> ScheduleFragment()
+                R.id.teamFragment -> TeamsFragment()
+                R.id.notificationsFragment -> NotificationsFragment()
+                R.id.profileFragment -> ProfileFragment()
+                else -> TableFragment()
+            }
+
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.fragment_container, selectedFragment)
+                .addToBackStack(null)
+                .commit()
+            true
+        }
+    }
+}
+
